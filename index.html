@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Reporte Mensual de Recuperación</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- jsPDF -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<style>
+body{
+  margin:0;
+  padding:20px;
+  font-family:Arial, sans-serif;
+  background:linear-gradient(to right,#00416A,#E4E5E6);
+  color:white;
+}
+h2{text-align:center}
+
+.controls{
+  text-align:center;
+  margin-bottom:20px;
+}
+
+label{margin:0 6px}
+
+select,input{
+  padding:6px;
+  border-radius:6px;
+  border:none;
+}
+
+button{
+  padding:8px 14px;
+  margin-left:10px;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-pdf{background:#d32f2f;color:white}
+
+.section{
+  max-width:1100px;
+  margin:20px auto;
+  background:white;
+  color:#333;
+  border-radius:10px;
+  padding:15px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+
+th,td{
+  border:1px solid #ccc;
+  padding:8px;
+  text-align:center;
+}
+
+th{background:#003366;color:white}
+
+.total{
+  text-align:right;
+  font-weight:bold;
+  margin-top:10px;
+}
+
+canvas{
+  max-width:600px;
+  margin:20px auto;
+  display:block;
+}
+</style>
+</head>
+
+<body>
+
+<h2>📊 Reporte Mensual de Recuperación</h2>
+
+<div class="controls">
+  <label>📅 Mes:</label>
+  <input type="month" id="mesFiltro">
+
+  <label>🏬 Sucursal:</label>
+  <select id="sucursalFiltro">
+    <option value="">Todas</option>
+  </select>
+
+  <button class="btn-pdf" onclick="exportarPDF()">📄 Exportar PDF</button>
+</div>
+
+<div class="section">
+  <canvas id="grafica"></canvas>
+</div>
+
+<div class="section">
+  <h3 style="color:green">✅ Recuperado</h3>
+  <table id="tablaRecuperado">
+    <thead>
+      <tr>
+        <th>Artículo</th>
+        <th>Cantidad</th>
+        <th>Costo Total</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="total" id="totalRecuperado">$0.00</div>
+</div>
+
+<div class="section">
+  <h3 style="color:red">❌ NO Recuperado</h3>
+  <table id="tablaNoRecuperado">
+    <thead>
+      <tr>
+        <th>Artículo</th>
+        <th>Cantidad</th>
+        <th>Costo Total</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="total" id="totalNoRecuperado">$0.00</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  query,
+  where,
+  getDocs
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ───── Firebase ───── */
+const firebaseConfig = {
+  apiKey: "AIzaSyCK5nb6u2CGRJ8AB1aPlRn54b97bdeAFeM",
+  authDomain: "inventariopv-643f1.firebaseapp.com",
+  projectId: "inventariopv-643f1"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* ───── Estado ───── */
+let chart = null;
+let resumenGlobal = { recuperado:0, noRecuperado:0 };
+
+/* ───── Cargar sucursales ───── */
+async function cargarSucursales(){
+  const snap = await getDocs(collection(db,"almacenes","MERMA","registros"));
+  const select = document.getElementById("sucursalFiltro");
+  const set = new Set();
+
+  snap.forEach(d=>{
+    const s = d.data().sucursal;
+    if(s) set.add(s);
+  });
+
+  set.forEach(s=>{
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    select.appendChild(opt);
+  });
+}
+cargarSucursales();
+
+/* ───── Eventos ───── */
+document.getElementById("mesFiltro").addEventListener("change", cargarReporte);
+document.getElementById("sucursalFiltro").addEventListener("change", cargarReporte);
+
+/* ───── Cargar reporte ───── */
+async function cargarReporte(){
+  const mes = document.getElementById("mesFiltro").value;
+  if(!mes) return;
+
+  const sucursalSel = document.getElementById("sucursalFiltro").value;
+
+  const inicio = new Date(`${mes}-01T00:00:00`);
+  const fin = new Date(inicio);
+  fin.setMonth(fin.getMonth()+1);
+
+  const q = query(
+    collection(db,"almacenes","MERMA","registros"),
+    where("fecha",">=",inicio),
+    where("fecha","<",fin)
+  );
+
+  const snap = await getDocs(q);
+
+  const data = { RECUPERADO:{}, NO_RECUPERADO:{} };
+  resumenGlobal = { recuperado:0, noRecuperado:0 };
+
+  snap.forEach(docSnap=>{
+    const d = docSnap.data();
+
+    if (sucursalSel && d.sucursal !== sucursalSel) return;
+    if (!d.estadoRecuperacion || d.estadoRecuperacion === "PENDIENTE") return;
+
+    const grupo = data[d.estadoRecuperacion];
+    if (!grupo[d.descripcion]) {
+      grupo[d.descripcion] = { cantidad:0, total:0 };
+    }
+
+    grupo[d.descripcion].cantidad += Number(d.cantidad||0);
+    grupo[d.descripcion].total += Number(d.total||0);
+
+    if(d.estadoRecuperacion==="RECUPERADO")
+      resumenGlobal.recuperado += Number(d.total||0);
+
+    if(d.estadoRecuperacion==="NO_RECUPERADO")
+      resumenGlobal.noRecuperado += Number(d.total||0);
+  });
+
+  pintarTabla("RECUPERADO", data.RECUPERADO);
+  pintarTabla("NO_RECUPERADO", data.NO_RECUPERADO);
+  pintarGrafica();
+}
+
+/* ───── Pintar tablas ───── */
+function pintarTabla(tipo, datos){
+  const tbody = document.querySelector(
+    tipo==="RECUPERADO"
+      ? "#tablaRecuperado tbody"
+      : "#tablaNoRecuperado tbody"
+  );
+
+  const totalEl = document.getElementById(
+    tipo==="RECUPERADO"
+      ? "totalRecuperado"
+      : "totalNoRecuperado"
+  );
+
+  tbody.innerHTML="";
+  let total=0;
+
+  Object.entries(datos).forEach(([art,v])=>{
+    total+=v.total;
+    tbody.innerHTML+=`
+      <tr>
+        <td>${art}</td>
+        <td>${v.cantidad}</td>
+        <td>$${v.total.toFixed(2)}</td>
+      </tr>`;
+  });
+
+  totalEl.textContent = `Total: $${total.toFixed(2)}`;
+}
+
+/* ───── Gráfica ───── */
+function pintarGrafica(){
+  const ctx = document.getElementById("grafica");
+  if(chart) chart.destroy();
+
+  chart = new Chart(ctx,{
+    type:"bar",
+    data:{
+      labels:["Recuperado","No Recuperado"],
+      datasets:[{
+        data:[
+          resumenGlobal.recuperado,
+          resumenGlobal.noRecuperado
+        ]
+      }]
+    },
+    options:{
+      plugins:{legend:{display:false}},
+      scales:{y:{beginAtZero:true}}
+    }
+  });
+}
+
+/* ───── PDF ───── */
+window.exportarPDF = function(){
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+
+  pdf.setFontSize(14);
+  pdf.text("Reporte Mensual de Recuperación",20,20);
+
+  pdf.setFontSize(12);
+  pdf.text(`Recuperado: $${resumenGlobal.recuperado.toFixed(2)}`,20,35);
+  pdf.text(`No Recuperado: $${resumenGlobal.noRecuperado.toFixed(2)}`,20,45);
+
+  pdf.save("reporte_recuperacion_mensual.pdf");
+};
+</script>
+
+</body>
+</html>

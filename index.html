@@ -159,15 +159,23 @@ const db = getFirestore(app);
 /* ───────── Estado global ───────── */
 let chart = null;
 
-let resumenGlobal = {
-  recuperado: 0,
-  noRecuperado: 0
-};
+let resumenGlobal = { recuperado: 0, noRecuperado: 0 };
+let detalleReporte = { RECUPERADO: {}, NO_RECUPERADO: {} };
 
-let detalleReporte = {
-  RECUPERADO: {},
-  NO_RECUPERADO: {}
-};
+/* ───────── NORMALIZADOR (FIX REAL) ───────── */
+function normalizarTexto(texto){
+  if(!texto) return "";
+
+  return texto
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")   // quita acentos
+    .replace(/ñ/g,"n")
+    .replace(/Ñ/g,"N")
+    .replace(/[^\x20-\x7E]/g,"")      // elimina caracteres corruptos jsPDF
+    .replace(/\s+/g," ")
+    .trim();
+}
 
 /* ───────── Cargar sucursales ───────── */
 async function cargarSucursales(){
@@ -222,12 +230,12 @@ async function cargarReporte(){
     if (!d.estadoRecuperacion || d.estadoRecuperacion === "PENDIENTE") return;
 
     const grupo = detalleReporte[d.estadoRecuperacion];
-    if (!grupo[d.descripcion]) {
-      grupo[d.descripcion] = { cantidad:0, total:0 };
-    }
+    const desc = normalizarTexto(d.descripcion);
 
-    grupo[d.descripcion].cantidad += Number(d.cantidad || 0);
-    grupo[d.descripcion].total += Number(d.total || 0);
+    if (!grupo[desc]) grupo[desc] = { cantidad:0, total:0 };
+
+    grupo[desc].cantidad += Number(d.cantidad || 0);
+    grupo[desc].total += Number(d.total || 0);
 
     if (d.estadoRecuperacion === "RECUPERADO")
       resumenGlobal.recuperado += Number(d.total || 0);
@@ -293,38 +301,32 @@ function pintarGrafica(){
     }
   });
 }
-function normalizarTexto(texto){
-  if(!texto) return "";
 
-  return texto
-    .normalize("NFD")               // separa acentos
-    .replace(/[\u0300-\u036f]/g,"") // elimina acentos
-    .replace(/ñ/g,"n")
-    .replace(/Ñ/g,"N");
-}
 /* ───────── PDF COMPLETO ───────── */
 window.exportarPDF = function(){
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF();
 
   const mes = document.getElementById("mesFiltro").value || "N/D";
-  const sucursal = document.getElementById("sucursalFiltro").value || "Todas";
-  const fechaGen = new Date().toLocaleString("es-MX");
+  const sucursal = normalizarTexto(
+    document.getElementById("sucursalFiltro").value || "Todas"
+  );
+  const fechaGen = normalizarTexto(new Date().toLocaleString("es-MX"));
 
   let y = 20;
 
   pdf.setFontSize(16);
-  pdf.text("Reporte Mensual de Recuperación", 20, y);
+  pdf.text(normalizarTexto("Reporte Mensual de Recuperacion"), 20, y);
   y += 10;
 
   pdf.setFontSize(11);
   pdf.text(`Sucursal: ${sucursal}`, 20, y); y += 6;
   pdf.text(`Mes: ${mes}`, 20, y); y += 6;
-  pdf.text(`Fecha de generación: ${fechaGen}`, 20, y);
+  pdf.text(`Fecha de generacion: ${fechaGen}`, 20, y);
   y += 10;
 
   pdf.setFontSize(13);
-  pdf.text("Resumen General", 20, y);
+  pdf.text(normalizarTexto("Resumen General"), 20, y);
   y += 8;
 
   pdf.setFontSize(11);
@@ -345,11 +347,11 @@ function imprimirTablaPDF(pdf, titulo, datos, yInicio){
   let y = yInicio;
 
   pdf.setFontSize(13);
-  pdf.text(titulo, 20, y);
+  pdf.text(normalizarTexto(titulo), 20, y);
   y += 8;
 
   pdf.setFontSize(10);
-  pdf.text("Artículo", 20, y);
+  pdf.text("Articulo", 20, y);
   pdf.text("Cantidad", 120, y);
   pdf.text("Costo", 160, y);
   y += 4;
@@ -363,7 +365,7 @@ function imprimirTablaPDF(pdf, titulo, datos, yInicio){
       y = 20;
     }
 
-   pdf.text(normalizarTexto(art).substring(0,40), 20, y);
+    pdf.text(art.substring(0,40), 20, y);
     pdf.text(String(v.cantidad), 120, y);
     pdf.text(`$${v.total.toFixed(2)}`, 160, y);
     y += 6;

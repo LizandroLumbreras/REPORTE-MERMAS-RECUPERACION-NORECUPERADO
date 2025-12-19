@@ -107,7 +107,7 @@ canvas{
 </div>
 
 <div class="section">
-  <h3 style="color:green">✅ Recuperado</h3>
+  <h3 style="color:green">✅ Productos Recuperados</h3>
   <table id="tablaRecuperado">
     <thead>
       <tr>
@@ -122,7 +122,7 @@ canvas{
 </div>
 
 <div class="section">
-  <h3 style="color:red">❌ NO Recuperado</h3>
+  <h3 style="color:red">❌ Productos NO Recuperados</h3>
   <table id="tablaNoRecuperado">
     <thead>
       <tr>
@@ -146,7 +146,7 @@ import {
   getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-/* ───── Firebase ───── */
+/* ───────── Firebase ───────── */
 const firebaseConfig = {
   apiKey: "AIzaSyCK5nb6u2CGRJ8AB1aPlRn54b97bdeAFeM",
   authDomain: "inventariopv-643f1.firebaseapp.com",
@@ -156,11 +156,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-/* ───── Estado ───── */
+/* ───────── Estado global ───────── */
 let chart = null;
-let resumenGlobal = { recuperado:0, noRecuperado:0 };
 
-/* ───── Cargar sucursales ───── */
+let resumenGlobal = {
+  recuperado: 0,
+  noRecuperado: 0
+};
+
+let detalleReporte = {
+  RECUPERADO: {},
+  NO_RECUPERADO: {}
+};
+
+/* ───────── Cargar sucursales ───────── */
 async function cargarSucursales(){
   const snap = await getDocs(collection(db,"almacenes","MERMA","registros"));
   const select = document.getElementById("sucursalFiltro");
@@ -180,11 +189,11 @@ async function cargarSucursales(){
 }
 cargarSucursales();
 
-/* ───── Eventos ───── */
+/* ───────── Eventos ───────── */
 document.getElementById("mesFiltro").addEventListener("change", cargarReporte);
 document.getElementById("sucursalFiltro").addEventListener("change", cargarReporte);
 
-/* ───── Cargar reporte ───── */
+/* ───────── Cargar reporte ───────── */
 async function cargarReporte(){
   const mes = document.getElementById("mesFiltro").value;
   if(!mes) return;
@@ -203,7 +212,7 @@ async function cargarReporte(){
 
   const snap = await getDocs(q);
 
-  const data = { RECUPERADO:{}, NO_RECUPERADO:{} };
+  detalleReporte = { RECUPERADO:{}, NO_RECUPERADO:{} };
   resumenGlobal = { recuperado:0, noRecuperado:0 };
 
   snap.forEach(docSnap=>{
@@ -212,27 +221,27 @@ async function cargarReporte(){
     if (sucursalSel && d.sucursal !== sucursalSel) return;
     if (!d.estadoRecuperacion || d.estadoRecuperacion === "PENDIENTE") return;
 
-    const grupo = data[d.estadoRecuperacion];
+    const grupo = detalleReporte[d.estadoRecuperacion];
     if (!grupo[d.descripcion]) {
       grupo[d.descripcion] = { cantidad:0, total:0 };
     }
 
-    grupo[d.descripcion].cantidad += Number(d.cantidad||0);
-    grupo[d.descripcion].total += Number(d.total||0);
+    grupo[d.descripcion].cantidad += Number(d.cantidad || 0);
+    grupo[d.descripcion].total += Number(d.total || 0);
 
-    if(d.estadoRecuperacion==="RECUPERADO")
-      resumenGlobal.recuperado += Number(d.total||0);
+    if (d.estadoRecuperacion === "RECUPERADO")
+      resumenGlobal.recuperado += Number(d.total || 0);
 
-    if(d.estadoRecuperacion==="NO_RECUPERADO")
-      resumenGlobal.noRecuperado += Number(d.total||0);
+    if (d.estadoRecuperacion === "NO_RECUPERADO")
+      resumenGlobal.noRecuperado += Number(d.total || 0);
   });
 
-  pintarTabla("RECUPERADO", data.RECUPERADO);
-  pintarTabla("NO_RECUPERADO", data.NO_RECUPERADO);
+  pintarTabla("RECUPERADO", detalleReporte.RECUPERADO);
+  pintarTabla("NO_RECUPERADO", detalleReporte.NO_RECUPERADO);
   pintarGrafica();
 }
 
-/* ───── Pintar tablas ───── */
+/* ───────── Pintar tablas ───────── */
 function pintarTabla(tipo, datos){
   const tbody = document.querySelector(
     tipo==="RECUPERADO"
@@ -262,7 +271,7 @@ function pintarTabla(tipo, datos){
   totalEl.textContent = `Total: $${total.toFixed(2)}`;
 }
 
-/* ───── Gráfica ───── */
+/* ───────── Gráfica ───────── */
 function pintarGrafica(){
   const ctx = document.getElementById("grafica");
   if(chart) chart.destroy();
@@ -285,20 +294,75 @@ function pintarGrafica(){
   });
 }
 
-/* ───── PDF ───── */
+/* ───────── PDF COMPLETO ───────── */
 window.exportarPDF = function(){
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF();
 
-  pdf.setFontSize(14);
-  pdf.text("Reporte Mensual de Recuperación",20,20);
+  const mes = document.getElementById("mesFiltro").value || "N/D";
+  const sucursal = document.getElementById("sucursalFiltro").value || "Todas";
+  const fechaGen = new Date().toLocaleString("es-MX");
 
-  pdf.setFontSize(12);
-  pdf.text(`Recuperado: $${resumenGlobal.recuperado.toFixed(2)}`,20,35);
-  pdf.text(`No Recuperado: $${resumenGlobal.noRecuperado.toFixed(2)}`,20,45);
+  let y = 20;
 
-  pdf.save("reporte_recuperacion_mensual.pdf");
+  pdf.setFontSize(16);
+  pdf.text("Reporte Mensual de Recuperación", 20, y);
+  y += 10;
+
+  pdf.setFontSize(11);
+  pdf.text(`Sucursal: ${sucursal}`, 20, y); y += 6;
+  pdf.text(`Mes: ${mes}`, 20, y); y += 6;
+  pdf.text(`Fecha de generación: ${fechaGen}`, 20, y);
+  y += 10;
+
+  pdf.setFontSize(13);
+  pdf.text("Resumen General", 20, y);
+  y += 8;
+
+  pdf.setFontSize(11);
+  pdf.text(`Total Recuperado: $${resumenGlobal.recuperado.toFixed(2)}`, 20, y); y += 6;
+  pdf.text(`Total NO Recuperado: $${resumenGlobal.noRecuperado.toFixed(2)}`, 20, y); y += 6;
+
+  const totalGlobal = resumenGlobal.recuperado + resumenGlobal.noRecuperado;
+  pdf.text(`Total Global: $${totalGlobal.toFixed(2)}`, 20, y);
+  y += 12;
+
+  y = imprimirTablaPDF(pdf, "Productos Recuperados", detalleReporte.RECUPERADO, y);
+  imprimirTablaPDF(pdf, "Productos NO Recuperados", detalleReporte.NO_RECUPERADO, y);
+
+  pdf.save(`reporte_recuperacion_${mes}.pdf`);
 };
+
+function imprimirTablaPDF(pdf, titulo, datos, yInicio){
+  let y = yInicio;
+
+  pdf.setFontSize(13);
+  pdf.text(titulo, 20, y);
+  y += 8;
+
+  pdf.setFontSize(10);
+  pdf.text("Artículo", 20, y);
+  pdf.text("Cantidad", 120, y);
+  pdf.text("Costo", 160, y);
+  y += 4;
+
+  pdf.line(20, y, 190, y);
+  y += 4;
+
+  Object.entries(datos).forEach(([art, v]) => {
+    if (y > 270) {
+      pdf.addPage();
+      y = 20;
+    }
+
+    pdf.text(art.substring(0,40), 20, y);
+    pdf.text(String(v.cantidad), 120, y);
+    pdf.text(`$${v.total.toFixed(2)}`, 160, y);
+    y += 6;
+  });
+
+  return y + 10;
+}
 </script>
 
 </body>
